@@ -7,7 +7,7 @@ from google.genai import types
 
 st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wide")
 
-# --- APIキーの設定（Streamlit Secrets から安全に取得） ---
+# --- APIキーの設定（Streamlit Secrets から取得） ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 if not api_key:
@@ -15,32 +15,38 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-# 高速応答用の設定（無駄な長考プロセスをカットし、短時間で即答）
+# 超高速・軽量設定（長考させず即答させる）
 fast_question_config = types.GenerateContentConfig(
-    max_output_tokens=1000,
+    max_output_tokens=800,
     thinking_config=types.ThinkingConfig(thinking_budget=0)
 )
 
 fast_explanation_config = types.GenerateContentConfig(
-    max_output_tokens=1500,
+    max_output_tokens=1200,
     thinking_config=types.ThinkingConfig(thinking_budget=0)
 )
 
-def generate_fast(prompt, config):
-    """高速にテキストを生成する関数"""
-    for attempt in range(2):
+def generate_fast_fallback(prompt, config):
+    """無料枠でも混雑しにくい超軽量モデルを優先し、エラー時は別モデルへ切り替える関数"""
+    # 応答が最速の lite モデルを最優先にし、ダメなら通常モデルを試す
+    candidate_models = ["gemini-2.5-flash-lite", "gemini-3.8-flash"]
+    
+    last_err = None
+    for model_name in candidate_models:
         try:
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=model_name,
                 contents=prompt,
                 config=config
             )
-            return response.text
+            if response and response.text:
+                return response.text
         except Exception as e:
-            if attempt == 0 and ("503" in str(e) or "UNAVAILABLE" in str(e)):
-                time.sleep(1)
-                continue
-            raise e
+            last_err = e
+            time.sleep(1)
+            continue
+            
+    raise last_err
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
@@ -92,24 +98,24 @@ if df is not None:
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
-            with st.spinner("出題作成中（約5秒）..."):
+            with st.spinner("出題を作成中（数秒〜十数秒）..."):
                 target = weak_records.sample(1).iloc[0]
                 target_dict = target.to_dict()
                 log_text = "\n".join([f"- {k}: {v}" for k, v in target_dict.items() if pd.notna(v)])
                 
                 prompt = f"""
-国家資格（土地家屋調査士）の択一問題を1問作成してください。
+土地家屋調査士試験の択一問題を1問作成してください。
 
 【弱点データ】
 {log_text}
 
 【要件】
-1. 生徒がつまずいた論点を突いた、本試験レベルのひっかけを含む問題（5肢択一または正誤判定）。
+1. つまずいた論点を突いた択一問題（5肢択一または正誤判定）。
 2. 出力は「問題文と選択肢のみ」。正解や解説は一切含めないこと。
-3. 簡潔かつ迅速に出力してください。
+3. 簡潔に出力してください。
 """
                 try:
-                    question_text = generate_fast(prompt, fast_question_config)
+                    question_text = generate_fast_fallback(prompt, fast_question_config)
                     st.session_state.current_question = question_text
                     st.session_state.target_info = target_dict
                     st.session_state.explanation = None
@@ -130,9 +136,9 @@ if st.session_state.current_question:
     user_answer = st.text_input("あなたの解答（例: 肢3、○、× など）:")
     
     if st.button("解答を提出して解説を見る"):
-        with st.spinner("解説生成中（約5秒）..."):
+        with st.spinner("解説を生成中（数秒〜十数秒）..."):
             exp_prompt = f"""
-以下の問題に対して生徒が「{user_answer}」と解答しました。要点を絞って解説してください。
+以下の問題に対して生徒が「{user_answer}」と解答しました。簡潔に解説してください。
 
 【問題文】
 {st.session_state.current_question}
@@ -147,7 +153,7 @@ if st.session_state.current_question:
 4. 確認すべき参考テキスト項目
 """
             try:
-                exp_text = generate_fast(exp_prompt, fast_explanation_config)
+                exp_text = generate_fast_fallback(exp_prompt, fast_explanation_config)
                 st.session_state.explanation = exp_text
             except Exception as e:
                 st.error(f"解説生成エラー: {e}")
