@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import glob
+import time
 from google import genai
+from google.genai.errors import APIError
 
 st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wide")
 
@@ -12,6 +14,27 @@ if not api_key:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 client = genai.Client(api_key=api_key) if api_key else None
+
+def generate_with_retry(prompt, retries=3, delay=2):
+    """503など一時的な混雑時に自動再試行するラッパー関数"""
+    for i in range(retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt
+            )
+            return response.text
+        except APIError as e:
+            if getattr(e, "code", None) == 503 or "503" in str(e):
+                if i < retries - 1:
+                    time.sleep(delay * (i + 1))
+                    continue
+            raise e
+        except Exception as e:
+            if "503" in str(e) and i < retries - 1:
+                time.sleep(delay * (i + 1))
+                continue
+            raise e
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
@@ -82,15 +105,12 @@ if df is not None:
 4. 最後に「【問題文出力完了】」と書いて終了してください。
 """
                 try:
-                    response = client.models.generate_content(
-                        model="gemini-3.8-flash",
-                        contents=prompt
-                    )
-                    st.session_state.current_question = response.text
+                    question_text = generate_with_retry(prompt)
+                    st.session_state.current_question = question_text
                     st.session_state.target_info = target_dict
                     st.session_state.explanation = None
                 except Exception as e:
-                    st.error(f"問題生成エラー: {e}")
+                    st.error(f"問題生成エラー（一時的な混雑）: 10秒ほど待ってから再試行してください。\n詳細: {e}")
 else:
     st.warning("リポジトリ内にCSVファイルが見つかりません。")
 
@@ -124,13 +144,10 @@ if st.session_state.current_question:
 4. 📖 テキスト参照案内：手元のテキストで確認すべき「関連項目名」および「おおよその参照章・論点」
 """
             try:
-                exp_response = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=exp_prompt
-                )
-                st.session_state.explanation = exp_response.text
+                exp_text = generate_with_retry(exp_prompt)
+                st.session_state.explanation = exp_text
             except Exception as e:
-                st.error(f"解説生成エラー: {e}")
+                st.error(f"解説生成エラー（一時的な混雑）: 少し待ってから再度「解答を提出」を押してください。\n詳細: {e}")
 
 # --- 4. 解説表示 ---
 if st.session_state.explanation:
