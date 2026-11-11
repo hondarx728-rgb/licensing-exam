@@ -8,6 +8,7 @@ st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wi
 # --- APIキーの設定（Streamlit Secrets から安全に取得） ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
+# 未設定時の入力フォールバック
 if not api_key:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
@@ -58,8 +59,8 @@ if df is not None:
 
     # --- 2. 出題生成ボタン ---
     if st.button("🚨 苦手論点から新しい問題を生成する"):
-        if not client:
-            st.error("APIキーが設定されていません。StreamlitのSecretsを確認してください。")
+        if not client or not api_key:
+            st.error("APIキーが設定されていません。StreamlitのSecrets設定を確認してください。")
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
@@ -81,14 +82,16 @@ if df is not None:
 3. この段階では「問題文と選択肢のみ」を出力してください（正解と解説は出力しないこと）。
 4. 最後に「【問題文出力完了】」と書いて終了してください。
 """
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt
-                )
-                
-                st.session_state.current_question = response.text
-                st.session_state.target_info = target_dict
-                st.session_state.explanation = None
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.0-flash",
+                        contents=prompt
+                    )
+                    st.session_state.current_question = response.text
+                    st.session_state.target_info = target_dict
+                    st.session_state.explanation = None
+                except Exception as e:
+                    st.error(f"問題生成エラー: {e}")
 else:
     st.warning("リポジトリ内にCSVファイルが見つかりません。")
 
@@ -121,11 +124,14 @@ if st.session_state.current_question:
 3. 生徒が過去にミスした視点を踏まえた「見抜くためのアドバイス」
 4. 📖 テキスト参照案内：手元のテキストで確認すべき「関連項目名」および「おおよその参照章・論点」
 """
-            exp_response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=exp_prompt
-            )
-            st.session_state.explanation = exp_response.text
+            try:
+                exp_response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=exp_prompt
+                )
+                st.session_state.explanation = exp_response.text
+            except Exception as e:
+                st.error(f"解説生成エラー: {e}")
 
 # --- 4. 解説表示 ---
 if st.session_state.explanation:
