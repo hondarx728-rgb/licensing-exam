@@ -3,7 +3,7 @@ import pandas as pd
 import glob
 import time
 from google import genai
-from google.genai.errors import APIError
+from google.genai import types
 
 st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wide")
 
@@ -15,24 +15,30 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-def generate_with_retry(prompt, retries=3, delay=2):
-    """503など一時的な混雑時に自動再試行するラッパー関数"""
-    for i in range(retries):
+# 高速応答用の設定（思考プロセスを最小化し、最大トークンを制限）
+fast_question_config = types.GenerateContentConfig(
+    max_output_tokens=1000,
+    thinking_config=types.ThinkingConfig(thinking_budget=0)
+)
+
+fast_explanation_config = types.GenerateContentConfig(
+    max_output_tokens=1500,
+    thinking_config=types.ThinkingConfig(thinking_budget=0)
+)
+
+def generate_fast(prompt, config):
+    """高速にテキストを生成する関数"""
+    for attempt in range(2):
         try:
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config
             )
             return response.text
-        except APIError as e:
-            if getattr(e, "code", None) == 503 or "503" in str(e):
-                if i < retries - 1:
-                    time.sleep(delay * (i + 1))
-                    continue
-            raise e
         except Exception as e:
-            if "503" in str(e) and i < retries - 1:
-                time.sleep(delay * (i + 1))
+            if attempt == 0 and "503" in str(e):
+                time.sleep(1)
                 continue
             raise e
 
@@ -86,31 +92,29 @@ if df is not None:
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
-            with st.spinner("苦手論点を分析して出題を作成中..."):
+            with st.spinner("出題作成中（約5〜10秒）..."):
                 target = weak_records.sample(1).iloc[0]
                 target_dict = target.to_dict()
                 log_text = "\n".join([f"- {k}: {v}" for k, v in target_dict.items() if pd.notna(v)])
                 
                 prompt = f"""
-あなたは国家資格試験（土地家屋調査士試験等）の専属講師です。
-生徒の過去問正誤ログから、特に苦手としている論点・ミスしやすいポイントを突いた択一問題を1問作成してください。
+国家資格（土地家屋調査士）の択一問題を1問作成してください。
 
-【生徒の過去のつまずきデータ】
+【弱点データ】
 {log_text}
 
-【問題作成の要件】
-1. 本試験レベルのひっかけ（生徒が間違えた理由を踏まえた選択肢）を含めてください。
-2. 5肢択一または正誤判定問題として出題してください。
-3. この段階では「問題文と選択肢のみ」を出力してください（正解と解説は出力しないこと）。
-4. 最後に「【問題文出力完了】」と書いて終了してください。
+【要件】
+1. 生徒がつまずいた論点を突いた、本試験レベルのひっかけを含む問題（5肢択一または正誤判定）。
+2. 出力は「問題文と選択肢のみ」。正解や解説は一切含めないこと。
+3. 簡潔かつ迅速に出力してください。
 """
                 try:
-                    question_text = generate_with_retry(prompt)
+                    question_text = generate_fast(prompt, fast_question_config)
                     st.session_state.current_question = question_text
                     st.session_state.target_info = target_dict
                     st.session_state.explanation = None
                 except Exception as e:
-                    st.error(f"問題生成エラー（一時的な混雑）: 10秒ほど待ってから再試行してください。\n詳細: {e}")
+                    st.error(f"問題生成エラー: {e}")
 else:
     st.warning("リポジトリ内にCSVファイルが見つかりません。")
 
@@ -126,28 +130,27 @@ if st.session_state.current_question:
     user_answer = st.text_input("あなたの解答（例: 肢3、○、× など）:")
     
     if st.button("解答を提出して解説を見る"):
-        with st.spinner("解説を生成中..."):
+        with st.spinner("解説生成中（約5〜10秒）..."):
             exp_prompt = f"""
-以下の問題に対して、生徒が「{user_answer}」と解答しました。
-詳細な解説を作成してください。
+以下の問題に対して生徒が「{user_answer}」と解答しました。要点を絞って解説してください。
 
 【問題文】
 {st.session_state.current_question}
 
-【元になった弱点データ】
+【元データ】
 {st.session_state.target_info}
 
-【解説の出力要件】
-1. 正解と生徒の成否の判定
-2. 各肢の詳しい解説（根拠条文・判例・計算のポイント）
-3. 生徒が過去にミスした視点を踏まえた「見抜くためのアドバイス」
-4. 📖 テキスト参照案内：手元のテキストで確認すべき「関連項目名」および「おおよその参照章・論点」
+【解説要件】
+1. 正解と合否判定
+2. 各肢の簡潔な解説（条文・判例根拠）
+3. ミスを防ぐ着眼点アドバイス
+4. 確認すべき参考テキスト項目
 """
             try:
-                exp_text = generate_with_retry(exp_prompt)
+                exp_text = generate_fast(exp_prompt, fast_explanation_config)
                 st.session_state.explanation = exp_text
             except Exception as e:
-                st.error(f"解説生成エラー（一時的な混雑）: 少し待ってから再度「解答を提出」を押してください。\n詳細: {e}")
+                st.error(f"解説生成エラー: {e}")
 
 # --- 4. 解説表示 ---
 if st.session_state.explanation:
