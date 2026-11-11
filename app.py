@@ -35,10 +35,8 @@ if csv_files:
             st.error(f"CSV読み込みエラー: {e}")
 
 if df is not None:
-    # 列名の前後の空白や改行をクリーンアップ
     df.columns = [str(c).strip().replace("\n", "").replace("\r", "") for c in df.columns]
     
-    # 正誤列を柔軟に特定（列名に「正誤・判定・成否・結果」を含む、または中身に「×」などを含む列）
     seigo_col = None
     for col in df.columns:
         if any(k in str(col) for k in ["正誤", "判定", "結果", "成否", "正解"]):
@@ -84,7 +82,7 @@ if df is not None:
 4. 最後に「【問題文出力完了】」と書いて終了してください。
 """
                 response = client.models.generate_content(
-                    model="gemini-3.8-flash",
+                    model="gemini-2.5-flash",
                     contents=prompt
                 )
                 
@@ -124,7 +122,7 @@ if st.session_state.current_question:
 4. 📖 テキスト参照案内：手元のテキストで確認すべき「関連項目名」および「おおよその参照章・論点」
 """
             exp_response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model="gemini-2.5-flash",
                 contents=exp_prompt
             )
             st.session_state.explanation = exp_response.text
