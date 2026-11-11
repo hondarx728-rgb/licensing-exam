@@ -14,15 +14,15 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-# 超高速・軽量設定（長考させず即答させる）
+# 出力トークンのみを制限して素早く完結させる設定
 fast_question_config = types.GenerateContentConfig(
     max_output_tokens=800,
-    thinking_config=types.ThinkingConfig(thinking_budget=0)
+    temperature=0.3
 )
 
 fast_explanation_config = types.GenerateContentConfig(
     max_output_tokens=1200,
-    thinking_config=types.ThinkingConfig(thinking_budget=0)
+    temperature=0.3
 )
 
 # 無料枠が広く、高クォータで高速な指定モデル
