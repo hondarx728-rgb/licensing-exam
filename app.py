@@ -8,7 +8,6 @@ st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wi
 # --- APIキーの設定（Streamlit Secrets から安全に取得） ---
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# 未設定時の入力フォールバック
 if not api_key:
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
@@ -84,7 +83,7 @@ if df is not None:
 """
                 try:
                     response = client.models.generate_content(
-                        model="gemini-2.0-flash",
+                        model="gemini-3.8-flash",
                         contents=prompt
                     )
                     st.session_state.current_question = response.text
@@ -126,7 +125,7 @@ if st.session_state.current_question:
 """
             try:
                 exp_response = client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-3.8-flash",
                     contents=exp_prompt
                 )
                 st.session_state.explanation = exp_response.text
