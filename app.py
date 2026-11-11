@@ -6,11 +6,9 @@ from google import genai
 st.set_page_config(page_title="弱点特化・資格演習アプリ", layout="wide")
 
 # --- APIキーの設定（Streamlit Secrets から安全に取得） ---
-# Streamlit Cloudの「Secrets」または手動入力からキーを取得
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 if not api_key:
-    # Secretsが未設定の場合の入力フォールバック
     api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 client = genai.Client(api_key=api_key) if api_key else None
@@ -37,17 +35,25 @@ if csv_files:
             st.error(f"CSV読み込みエラー: {e}")
 
 if df is not None:
+    # 列名の前後の空白や改行をクリーンアップ
     df.columns = [str(c).strip().replace("\n", "").replace("\r", "") for c in df.columns]
     
+    # 正誤列を柔軟に特定（列名に「正誤・判定・成否・結果」を含む、または中身に「×」などを含む列）
     seigo_col = None
     for col in df.columns:
-        if "正誤" in col or "判定" in col or "結果" in col:
+        if any(k in str(col) for k in ["正誤", "判定", "結果", "成否", "正解"]):
             seigo_col = col
             break
+    
+    if not seigo_col:
+        for col in df.columns:
+            if df[col].astype(str).str.contains("×|不正解|ミス|バツ|誤", na=False).any():
+                seigo_col = col
+                break
             
     if seigo_col:
         weak_records = df[df[seigo_col].astype(str).str.contains("×|不正解|ミス|バツ|誤", na=False)]
-        st.sidebar.success(f"正誤データを自動読込完了（苦手: {len(weak_records)} 件）")
+        st.sidebar.success(f"正誤データを自動読込完了（判定列: {seigo_col} / 苦手: {len(weak_records)} 件）")
     else:
         st.sidebar.warning("正誤列が見つかりません。全データから出題します。")
         weak_records = df
@@ -55,7 +61,7 @@ if df is not None:
     # --- 2. 出題生成ボタン ---
     if st.button("🚨 苦手論点から新しい問題を生成する"):
         if not client:
-            st.error("APIキーが設定されていません。")
+            st.error("APIキーが設定されていません。StreamlitのSecretsを確認してください。")
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
