@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import glob
-import time
 from google import genai
 from google.genai import types
 
@@ -15,7 +14,7 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-# 超高速・軽量設定（長考させず即答させる）
+# 無料枠が広く（1500回/日）、即座に応答する超高速設定
 fast_question_config = types.GenerateContentConfig(
     max_output_tokens=800,
     thinking_config=types.ThinkingConfig(thinking_budget=0)
@@ -26,27 +25,8 @@ fast_explanation_config = types.GenerateContentConfig(
     thinking_config=types.ThinkingConfig(thinking_budget=0)
 )
 
-def generate_fast_fallback(prompt, config):
-    """無料枠でも混雑しにくい超軽量モデルを優先し、エラー時は別モデルへ切り替える関数"""
-    # 応答が最速の lite モデルを最優先にし、ダメなら通常モデルを試す
-    candidate_models = ["gemini-2.5-flash-lite", "gemini-3.8-flash"]
-    
-    last_err = None
-    for model_name in candidate_models:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=config
-            )
-            if response and response.text:
-                return response.text
-        except Exception as e:
-            last_err = e
-            time.sleep(1)
-            continue
-            
-    raise last_err
+# 1日20回制限のモデルではなく、無料枠が豊富で速いモデルを指定
+FAST_MODEL = "gemini-2.5-flash-lite"
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
@@ -98,7 +78,7 @@ if df is not None:
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
-            with st.spinner("出題を作成中（数秒〜十数秒）..."):
+            with st.spinner("出題を作成中（数秒で完了します）..."):
                 target = weak_records.sample(1).iloc[0]
                 target_dict = target.to_dict()
                 log_text = "\n".join([f"- {k}: {v}" for k, v in target_dict.items() if pd.notna(v)])
@@ -115,8 +95,12 @@ if df is not None:
 3. 簡潔に出力してください。
 """
                 try:
-                    question_text = generate_fast_fallback(prompt, fast_question_config)
-                    st.session_state.current_question = question_text
+                    response = client.models.generate_content(
+                        model=FAST_MODEL,
+                        contents=prompt,
+                        config=fast_question_config
+                    )
+                    st.session_state.current_question = response.text
                     st.session_state.target_info = target_dict
                     st.session_state.explanation = None
                 except Exception as e:
@@ -136,7 +120,7 @@ if st.session_state.current_question:
     user_answer = st.text_input("あなたの解答（例: 肢3、○、× など）:")
     
     if st.button("解答を提出して解説を見る"):
-        with st.spinner("解説を生成中（数秒〜十数秒）..."):
+        with st.spinner("解説を生成中..."):
             exp_prompt = f"""
 以下の問題に対して生徒が「{user_answer}」と解答しました。簡潔に解説してください。
 
@@ -153,8 +137,12 @@ if st.session_state.current_question:
 4. 確認すべき参考テキスト項目
 """
             try:
-                exp_text = generate_fast_fallback(exp_prompt, fast_explanation_config)
-                st.session_state.explanation = exp_text
+                exp_response = client.models.generate_content(
+                    model=FAST_MODEL,
+                    contents=exp_prompt,
+                    config=fast_explanation_config
+                )
+                st.session_state.explanation = exp_response.text
             except Exception as e:
                 st.error(f"解説生成エラー: {e}")
 
