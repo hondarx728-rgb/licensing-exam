@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import glob
+import time
 from google import genai
 from google.genai import types
 
@@ -25,8 +26,31 @@ fast_explanation_config = types.GenerateContentConfig(
     temperature=0.3
 )
 
-# 無料枠が広く、高クォータで高速な指定モデル
-FAST_MODEL = "gemini-3.5-flash-lite"
+# 混雑時に順次切り替える軽量・高速モデルのリスト
+LIGHT_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash"
+]
+
+def request_with_fallback(prompt, config):
+    """503混雑時に即座に別モデルへフォールバックして即答させる関数"""
+    last_error = None
+    for model_name in LIGHT_MODELS:
+        try:
+            res = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config
+            )
+            if res and res.text:
+                return res.text
+        except Exception as e:
+            last_error = e
+            # 503混雑や一時エラーの場合は間髪入れずに次のモデルへ切り替え
+            time.sleep(0.5)
+            continue
+    raise last_error
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
@@ -95,12 +119,8 @@ if df is not None:
 3. 簡潔に出力してください。
 """
                 try:
-                    response = client.models.generate_content(
-                        model=FAST_MODEL,
-                        contents=prompt,
-                        config=fast_question_config
-                    )
-                    st.session_state.current_question = response.text
+                    q_text = request_with_fallback(prompt, fast_question_config)
+                    st.session_state.current_question = q_text
                     st.session_state.target_info = target_dict
                     st.session_state.explanation = None
                 except Exception as e:
@@ -137,12 +157,8 @@ if st.session_state.current_question:
 4. 確認すべき参考テキスト項目
 """
             try:
-                exp_response = client.models.generate_content(
-                    model=FAST_MODEL,
-                    contents=exp_prompt,
-                    config=fast_explanation_config
-                )
-                st.session_state.explanation = exp_response.text
+                exp_text = request_with_fallback(exp_prompt, fast_explanation_config)
+                st.session_state.explanation = exp_text
             except Exception as e:
                 st.error(f"解説生成エラー: {e}")
 
