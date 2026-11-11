@@ -14,7 +14,7 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-# 無料枠が広く（1500回/日）、即座に応答する超高速設定
+# 超高速・軽量設定（長考させず即答させる）
 fast_question_config = types.GenerateContentConfig(
     max_output_tokens=800,
     thinking_config=types.ThinkingConfig(thinking_budget=0)
@@ -25,8 +25,8 @@ fast_explanation_config = types.GenerateContentConfig(
     thinking_config=types.ThinkingConfig(thinking_budget=0)
 )
 
-# 1日20回制限のモデルではなく、無料枠が豊富で速いモデルを指定
-FAST_MODEL = "gemini-2.5-flash-lite"
+# 無料枠が広く、高クォータで高速な指定モデル
+FAST_MODEL = "gemini-3.5-flash-lite"
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = None
