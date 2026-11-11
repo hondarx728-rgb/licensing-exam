@@ -15,7 +15,7 @@ if not api_key:
 
 client = genai.Client(api_key=api_key) if api_key else None
 
-# 高速応答用の設定（思考プロセスを最小化し、最大トークンを制限）
+# 高速応答用の設定（無駄な長考プロセスをカットし、短時間で即答）
 fast_question_config = types.GenerateContentConfig(
     max_output_tokens=1000,
     thinking_config=types.ThinkingConfig(thinking_budget=0)
@@ -31,13 +31,13 @@ def generate_fast(prompt, config):
     for attempt in range(2):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt,
                 config=config
             )
             return response.text
         except Exception as e:
-            if attempt == 0 and "503" in str(e):
+            if attempt == 0 and ("503" in str(e) or "UNAVAILABLE" in str(e)):
                 time.sleep(1)
                 continue
             raise e
@@ -92,7 +92,7 @@ if df is not None:
         elif weak_records.empty:
             st.warning("出題対象のデータがありません。")
         else:
-            with st.spinner("出題作成中（約5〜10秒）..."):
+            with st.spinner("出題作成中（約5秒）..."):
                 target = weak_records.sample(1).iloc[0]
                 target_dict = target.to_dict()
                 log_text = "\n".join([f"- {k}: {v}" for k, v in target_dict.items() if pd.notna(v)])
@@ -130,7 +130,7 @@ if st.session_state.current_question:
     user_answer = st.text_input("あなたの解答（例: 肢3、○、× など）:")
     
     if st.button("解答を提出して解説を見る"):
-        with st.spinner("解説生成中（約5〜10秒）..."):
+        with st.spinner("解説生成中（約5秒）..."):
             exp_prompt = f"""
 以下の問題に対して生徒が「{user_answer}」と解答しました。要点を絞って解説してください。
 
